@@ -416,22 +416,30 @@ namespace game_utils
 
 	Matrix4x4 get_matrix()
 	{
-		return memory_utils::read<Matrix4x4>({ memory_utils::get_base_address(), 0x254E620 });
+		return memory_utils::read<Matrix4x4>({ memory_utils::get_base_address(), 0x254D620 });
 	}
 
 	char* get_my_name()
 	{
-		return memory_utils::read_string({ memory_utils::get_base_address(), 0x24FA890 });
+		return memory_utils::read_string({ memory_utils::get_base_address(), 0x24F9890 });
 	}
 
 	DWORD64 get_entity_list()
 	{
-		return memory_utils::read<DWORD64>({ (DWORD64)game_module, 0xC2D4B0, 0x80 });
+		return memory_utils::read<DWORD64>({ (DWORD64)game_module, 0xC2E4B8, 0x80 });
 	}
 
-	int max_players_on_map()
+	int get_max_players_on_map()
 	{
-		return memory_utils::read<int>({ (DWORD64)game_module, 0xBBF534 });
+		return memory_utils::read<int>({ (DWORD64)game_module, 0xBC0544 });
+	}
+
+	std::vector<std::string>m_vampire_log;
+
+	void cleanup_vampire_log()
+	{
+		if (m_vampire_log.size())
+			m_vampire_log.clear();
 	}
 
 	class CDeceitProperties
@@ -472,26 +480,14 @@ namespace game_utils
 			return memory_utils::read<DWORD64>({ player_entity, 0x60, 0x78 });
 		}
 
-		Vector get_origin(DWORD64 player_entity_movement_controller)
+		Vector get_origin_aabb_max(DWORD64 player_entity_movement_controller)
+		{
+			return memory_utils::read<Vector>({ player_entity_movement_controller, 0x218 });
+		}
+
+		Vector get_origin_aabb_min(DWORD64 player_entity_movement_controller)
 		{
 			return memory_utils::read<Vector>({ player_entity_movement_controller, 0x1E8 });
-		}
-
-		Vector get_aabb_max()
-		{
-			Vector aabb;
-
-			if (get_health() > 2.f)
-				aabb = Vector(0.f, 0.f, 1.8f);
-			else
-				aabb = Vector(0.f, 0.f, 0.4f);
-
-			return aabb;
-		}
-
-		Vector get_aabb_min()
-		{
-			return Vector(0.f, 0.f, -0.1f);
 		}
 	};
 
@@ -535,14 +531,20 @@ namespace functions
 	{
 		void esp()
 		{
+			if (vars::visuals::enable == false)
+				return;
+
 			auto entity_list = game_utils::get_entity_list();
 
 			if (entity_list == NULL)
+			{
+				game_utils::cleanup_vampire_log();
 				return;
+			}
 
 			auto view_projection = game_utils::get_matrix();
 
-			for (int i = 0; i < game_utils::max_players_on_map(); i++)
+			for (int i = 0; i < game_utils::get_max_players_on_map(); i++)
 			{
 				auto entity = game_utils::CDeceitProperties::get_player_by_id(entity_list, i);
 				
@@ -556,15 +558,34 @@ namespace functions
 				if (name == NULL)
 					continue;
 
-				auto color = entity->get_is_vampire_now() ? ImColor(1.f, 0.4f, 0.4f) : ImColor(1.f, 1.f, 1.f);
+				if (entity->get_is_vampire_now() && game_utils::m_vampire_log.size() < 2)
+				{
+					bool is_no_empty = game_utils::m_vampire_log.size() == 0 ? true : game_utils::m_vampire_log.front() != name;
 
-				auto player_entity_movement_controller = entity->player_entity_movement_controller(entity->player_entity());
+					if (is_no_empty)
+						game_utils::m_vampire_log.push_back(name);
+				}
+
+				ImColor color = ImColor(1.f, 1.f, 1.f);
+
+				for (auto v : game_utils::m_vampire_log)
+				{
+					if (v == name)
+						color = ImColor(1.f, 0.4f, 0.4f);
+				}
+
+				auto player_entity = entity->player_entity();
+
+				if (player_entity == NULL)
+					continue;
+
+				auto player_entity_movement_controller = entity->player_entity_movement_controller(player_entity);
 
 				if (player_entity_movement_controller == NULL)
 					continue;
 
-				auto v_bottom = entity->get_origin(player_entity_movement_controller) + entity->get_aabb_min();
-				auto v_top = entity->get_origin(player_entity_movement_controller) + entity->get_aabb_max();
+				auto v_bottom = entity->get_origin_aabb_min(player_entity_movement_controller);
+				auto v_top = entity->get_origin_aabb_max(player_entity_movement_controller);
 
 				float out_bottom[2], out_top[2];
 				if (game_utils::world_to_screen(view_projection, v_bottom, out_bottom)
